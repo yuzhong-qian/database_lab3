@@ -1,3 +1,11 @@
+import com.mongodb.BasicDBObject;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.event.ActionEvent;
@@ -8,6 +16,9 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Vector;
 import java.util.logging.Logger;
+
+import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.ne;
 
 
 /**
@@ -40,9 +51,7 @@ public class Reviewer {
     private JFrame frame;
 
     private JTable myTable;
-    private Connection con = null;
-    private Statement stmt = null;
-    private ResultSet rst = null;
+    private MongoDatabase database = null;
     private int reviewer_id;
 
     public static void main(String[] args) {
@@ -66,22 +75,15 @@ public class Reviewer {
         frame.setLocation(400, 0);
 
         reviewer_id = userid;
-        String query = "SELECT * FROM Reviewer WHERE idReviewer = " + userid;
-        con = DatebaseConnection.connection();
-        try {
-            stmt = con.createStatement();
-            rst = stmt.executeQuery(query);
-            String firstname = null;
-            String lastname = null;
-            while (rst.next()) {
-                firstname = rst.getString(3);
-                lastname = rst.getString(2);
-            }
 
-            Welcome.setText("Welcome, " + firstname + " " + lastname +"!");
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        database = DatebaseConnection.connection();
+        MongoCollection<Document> reviewer_cl = database.getCollection("Reviewer");
+        Document reviewer_dc = reviewer_cl.find(eq("idReviewer", userid)).first();
+
+        String firstname = reviewer_dc.getString("reviewerFirstName");
+        String lastname = reviewer_dc.getString("reviewerLastName");
+
+        Welcome.setText("Welcome, " + firstname + " " + lastname +"!");
 
         myTable = createTable("ALL");
         Manuscript_List.setViewportView(myTable);
@@ -89,12 +91,6 @@ public class Reviewer {
         Sign_out_btn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                try {
-                    stmt.close();
-                    con.close();
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
-                }
                 frame.dispose();
                 new Login();
             }
@@ -132,57 +128,34 @@ public class Reviewer {
                     return;
                 }
                 String timeStamp = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").format(Calendar.getInstance().getTime());
-                String insert = "INSERT INTO Feedback (`appropriateness`,`clarity`,`methodology`,`contribution`,`recommendation`,`dateReceive`) VALUES ("
-                        + score_appropriateness + "," + score_clarity + "," + score_contribution + "," + score_methodology + ",'" +
-                        recommendation + "','" + timeStamp + "')";
 
-                try {
-                    stmt.execute(insert);
+                MongoCollection<Document> assignment = database.getCollection("Assignment");
+                BasicDBObject feedback = new BasicDBObject("appropriateness", score_appropriateness).append("clarity", score_clarity)
+                        .append("methodology", score_methodology).append("contribution", score_contribution)
+                        .append("recommendation", recommendation).append("dateReceive", timeStamp);
 
-                    String id = "SELECT MAX(`idFeedback`) FROM Feedback";
-                    rst = stmt.executeQuery(id);
-                    rst.next();
-                    int id_max = rst.getInt(1);
+                assignment.updateOne(new BasicDBObject("idManuscript", Manu_id_text.getText()).append("idReviewer", reviewer_id), new BasicDBObject("$push", new BasicDBObject("feedback", feedback)));
 
-                    String update = "UPDATE Assignment SET `idFeedback` = " + id_max + " WHERE `idManuscript` = " +  Manu_id_text.getText() +
-                            " AND `idReviewer` = " + reviewer_id;
-                    stmt.execute(update);
-
-                    myTable = createTable("ALL");
-                    Manuscript_List.setViewportView(myTable);
-                    JOptionPane.showMessageDialog(frame, "Your feedback successfully submitted!");
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
-                }
+                myTable = createTable("ALL");
+                Manuscript_List.setViewportView(myTable);
+                JOptionPane.showMessageDialog(frame, "Your feedback successfully submitted!");
             }
         });
 
         Resign_btn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                String delete = "DELETE FROM Reviewer WHERE `idReviewer` = " + reviewer_id;
-
-                System.out.println(delete);
                 int flag = JOptionPane.showConfirmDialog(frame, "Are you sure to resign?");
-                System.out.println(flag);
+
                 if(flag == 0) {
+                    reviewer_cl.deleteOne(eq("idReviewer", reviewer_id));
                     JOptionPane.showMessageDialog(frame, "Thank you for your service.");
 
-                    try {
-                        stmt.execute(delete);
-                        stmt.close();
-                        con.close();
-                    } catch (SQLException e1) {
-                        e1.printStackTrace();
-                    }
                     frame.dispose();
                     new Login();
                 }
             }
         });
-
-
-
 
         appropriateness_select.addItem("-");
         for(int i = 1; i <= 10; i++)
@@ -236,18 +209,16 @@ public class Reviewer {
     }
 
     public JTable createTable(String status){
-        Logger logger = Logger.getLogger( Editor.class.getName() );
+        Logger logger = Logger.getLogger( Editor.class.getName());
 
-        String sql = null;
+        String[] content = null;
         if(status.equals("ALL"))
-            sql = "SELECT `idReviewer`,`idManuscript`,`assignDate` FROM Assignment WHERE `idReviewer` = " + reviewer_id
-                    + " AND `idFeedback` IS NULL ORDER BY `assignDate`";
+            content = new String[] {"idReviewer","idManuscript", "assignDate"};
         else if(status.equals("History"))
-            sql = "SELECT * FROM ReviewStatus WHERE `idReviewer` = " + reviewer_id
-                    + " AND `clarity` IS NOT NULL ORDER BY `assignDate`";
-//        else
-//            sql = "SELECT `publicationYear`,`publicationPeriod`,`volume`,`pages`,`printDate` FROM Issue WHERE `printDate` IS NULL ORDER BY `publicationYear` DESC,`publicationPeriod`";
-        DefaultTableModel dtm = buildTableModel(stmt, sql, status);
+            content = new String[] {"idReviewer","idManuscript", "assignDate", "feedback.appropriateness", "feedback.clarity"
+            , "feedback.methodology", "feedback.contribution", "feedback.recommendation", "feedback.dateReceive"};
+
+        DefaultTableModel dtm = buildTableModel(status, content);
 
         JTable table = new JTable(dtm);
         table.setFillsViewportHeight(true);
@@ -260,34 +231,40 @@ public class Reviewer {
     }
 
     static int columnCount = 0;
-    public static DefaultTableModel buildTableModel (Statement stmt, String sql, String status){
+
+    public DefaultTableModel buildTableModel (String status, String[] content){
         Vector<String> columnNames = new Vector<>();
         Vector<Vector<Object>> data = new Vector<>();
-        try {
-            ResultSet rs = stmt.executeQuery(sql);
 
-            ResultSetMetaData metaData = rs.getMetaData();
+        int columnCount = content.length;
+        for (int column = 0; column < columnCount; column++)
+            columnNames.add(content[column]);
 
-            columnCount = metaData.getColumnCount();
-            for (int column = 1; column <= columnCount; column++) {
-                columnNames.add(metaData.getColumnName(column));
+        if(status.equals("ALL"))
+            columnNames.add("");
+
+        MongoCollection<Document> assignment_cl = database.getCollection("Assignment");
+        FindIterable<Document> rs = null;
+        if(status.equals("ALL"))
+            rs = assignment_cl.find(new Document("idReviewer", reviewer_id).append("feedback", null));
+        else {
+            Bson filter = Filters.or(
+                    Filters.eq("idReviewer", reviewer_id),
+                    Filters.ne("feedback", null)
+            );
+            rs = assignment_cl.find(filter);
+        }
+
+        Vector<Object> vector = new Vector<Object>();
+        for(Document d: rs) {
+            for(String s: content) {
+                vector.add(d.get(s));
             }
             if(status.equals("ALL"))
-                columnNames.add("");
-            while (rs.next()) {
-                Vector<Object> vector = new Vector<Object>();
-                for (int columnIndex = 1; columnIndex <= columnCount; columnIndex++) {
-                    vector.add(rs.getObject(columnIndex));
-                }
-
-                if(status.equals("ALL"))
-                    vector.add("Feedback");
-                data.add(vector);
-            }
-
-        } catch (java.sql.SQLException sqle){
-            sqle.printStackTrace();
+                vector.add("Feedback");
+            data.add(vector);
         }
+
         return new DefaultTableModel(data, columnNames);
     }
 

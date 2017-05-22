@@ -1,3 +1,8 @@
+import com.mongodb.BasicDBObject;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
+
 import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -29,9 +34,7 @@ public class Feedback {
     private JFrame frame;
 
     private JTable myTable;
-    private Connection con = null;
-    private Statement stmt = null;
-    private ResultSet rst = null;
+    private MongoDatabase database = null;
 
     public static void main(String[] args) {
         JFrame frame = new JFrame("Feedback");
@@ -53,13 +56,7 @@ public class Feedback {
         frame.setVisible(true);
         frame.setLocation(540, 300);
 
-        con = DatebaseConnection.connection();
-
-        try {
-            stmt = con.createStatement();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        database = DatebaseConnection.connection();
 
         Feedback_title.setText("Feedback Form of Manuscript ID " + idManuscript);
 
@@ -92,34 +89,21 @@ public class Feedback {
                     return;
                 }
                 String timeStamp = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").format(Calendar.getInstance().getTime());
+
+                MongoCollection<Document> assignment = database.getCollection("Assignment");
+                BasicDBObject feedback = new BasicDBObject("appropriateness", score_appropriateness).append("clarity", score_clarity)
+                        .append("methodology", score_methodology).append("contribution", score_contribution)
+                        .append("recommendation", recommendation).append("dateReceive", timeStamp);
+
+                assignment.updateOne(new BasicDBObject("idManuscript", idManuscript).append("idReviewer", idReviewer), new BasicDBObject("$push", new BasicDBObject("feedback", feedback)));
+
+
+
                 String insert = "INSERT INTO Feedback (`appropriateness`,`clarity`,`methodology`,`contribution`,`recommendation`,`dateReceive`) VALUES ("
                         + score_appropriateness + "," + score_clarity + "," + score_contribution + "," + score_methodology + ",'" +
                         recommendation + "','" + timeStamp + "')";
 
-                try {
-                    stmt.execute(insert);
-
-                    String id = "SELECT MAX(`idFeedback`) FROM Feedback";
-
-
-                    rst = stmt.executeQuery(id);
-                    rst.next();
-                    int id_max = rst.getInt(1);
-
-                    System.out.println("Feedback ID " + id_max);
-                    String update = "UPDATE Assignment SET `idFeedback` = " + id_max + " WHERE `idManuscript` = " +  idManuscript +
-                            " AND `idReviewer` = " + idReviewer;
-                    System.out.println(update);
-                    stmt.execute(update);
-
-                    JOptionPane.showMessageDialog(frame, "Your feedback successfully submitted!");
-
-                    stmt.close();
-                    con.close();
-                    frame.dispose();
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
-                }
+                JOptionPane.showMessageDialog(frame, "Your feedback successfully submitted!");
             }
         });
     }
