@@ -1,3 +1,8 @@
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
+
 import javax.jws.soap.SOAPBinding;
 import javax.swing.*;
 import java.awt.*;
@@ -10,6 +15,8 @@ import java.sql.Statement;
 import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
+
+import static com.mongodb.client.model.Filters.eq;
 
 /**
  * Created by qianyuzhong on 4/29/17.
@@ -28,24 +35,16 @@ public class Login {
     private javax.swing.JPasswordField passwordField;
     private static List<String> interests;
     public static JFrame frame = new JFrame("Login");
-
-
-    private static Connection con = null;
-    private static Statement stmt = null;
-    private static ResultSet res = null;
-    public static final String QUERY = "SELECT interest FROM RICodes;";
+    private MongoDatabase database;
 
     public static void main(String[] args) {
         frame.setContentPane(new Login().Login);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.pack();
         frame.setVisible(true);
-
     }
 
     public Login() {
-
-
         frame.setLocation(600, 300);
         frame.setContentPane(Login);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -56,21 +55,14 @@ public class Login {
         User_type_select.addItem("Author");
         User_type_select.addItem("Reviewer");
 
-        con = DatebaseConnection.connection();
+        database = DatebaseConnection.connection();
         // initialize a query statement
-        try {
-            stmt = con.createStatement();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
 
         Login_btn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 String user = (String) User_type_select.getSelectedItem();
                 String id = Username_text.getText();
-                //String pw = passwordField.getPassword().toString();
-
 
                 if (id.equals("")) {
                     JOptionPane.showMessageDialog(frame,
@@ -83,36 +75,33 @@ public class Login {
                     return;
                 }
 
-
                 int userid = Integer.parseInt(id);
-                if (checkpw(user, userid)) {
-                    String getUser = "SELECT * FROM " + user + " WHERE id" + user + " = " + userid;
+                MongoCollection<Document> user_collection = database.getCollection(user);
+                long exist = user_collection.count(eq("id"+user, userid));
+                if (exist == 0) {
+                    JOptionPane.showMessageDialog(frame,
+                            "No such userid in " + user + "!");
+                    return;
+                }
 
-                    boolean isEmpty = true;
-                    try {
-                        res = stmt.executeQuery(getUser);
-                        while (res.next()) {
-                            isEmpty = false;
-                        }
-                    } catch (SQLException e1) {
-                        e1.printStackTrace();
-                    }
-                    if (isEmpty) {
+                if (checkpw(user, userid)) {
+
+
+                    FindIterable<Document> user_info = user_collection.find(eq("id"+user, userid));
+
+                    if (exist == 0) {
                         JOptionPane.showMessageDialog(frame,
                                 "No such userid in " + user + "!");
+                        return;
                     } else {
                         frame.dispose();
                         if (user.equals("Editor")) new Editor(userid);
-                        else if (user.equals("Author")) new Author(userid);
+//                        else if (user.equals("Author")) new Author(userid);
                         else if (user.equals("Reviewer")) new Reviewer(userid);
                         else JOptionPane.showMessageDialog(frame,
                                     "No such user type!");
-                        try {
-                            stmt.close();
-                            con.close();
-                            System.out.print("\nConnection terminated.");
-                        } catch (Exception exp) { /* ignore cleanup errors */ }
                     }
+                    frame.dispose();
                 } else {
                     JOptionPane.showMessageDialog(frame,
                             "Your password is not correct!");
@@ -122,16 +111,15 @@ public class Login {
             }
         });
 
-            Register_btn.addActionListener(e->
-
-            {
+        Register_btn.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 // display/center the jdialog when the button is pressed
                 frame.setVisible(false);
                 new Register();
             }
-
-            );
-        }
+        });
+    }
 
     public static boolean isNumeric(String str) {
         return str.matches("-?\\d+(\\.\\d+)?");  //match a number with optional '-' and decimal.
@@ -139,24 +127,12 @@ public class Login {
 
     private boolean checkpw(String type, int id) {
         String userPassword = String.valueOf(passwordField.getPassword());
-        String check = "SELECT password FROM Credential where usertype = '"+type+"'AND userid ="+id;
+        MongoCollection<Document> temp = database.getCollection(type);
 
-        try {
-            PreparedStatement checkPass = con.prepareStatement(check);
-            ResultSet rs = checkPass.executeQuery(check);
+        Document document = temp.find(eq("id" + type, id)).first();
 
-            if (rs.next()) {
-                if(rs.getString(1).equals(securePassword(userPassword))){
-                    return true;
-                }else {
-                    return false;
-                }
-            }
-        } catch (java.sql.SQLException e) {
-            e.printStackTrace();
-        }
+        if(document.get("Password").equals(securePassword(userPassword))) return true;
         return false;
-
     }
 
     private String securePassword(String passwordToHash){
