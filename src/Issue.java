@@ -1,3 +1,9 @@
+import com.mongodb.BasicDBObject;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
+
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.event.ActionEvent;
@@ -9,6 +15,9 @@ import java.util.Calendar;
 import java.util.List;
 import java.util.Vector;
 import java.util.logging.Logger;
+
+import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.ne;
 
 /**
  * Created by qianyuzhong on 5/2/17.
@@ -29,10 +38,7 @@ public class Issue {
     private JTextField Issue_Period_text;
     private JFrame frame;
     private JTable myTable;
-    private Connection con = null;
-    private Statement stmt = null;
-    private ResultSet rst = null;
-
+    private MongoDatabase database = null;
 
     public static void main(String[] args) {
         JFrame frame = new JFrame("Issue");
@@ -49,14 +55,11 @@ public class Issue {
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         frame.pack();
         frame.setVisible(true);
+//        Status_Part.setVisible(false);
 
-        con = DatebaseConnection.connection();
-        try {
-            stmt = con.createStatement();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-
+        database = DatebaseConnection.connection();
+        MongoCollection<Document> issue_cl = database.getCollection("Issue");
+        MongoCollection<Document> manuscript_cl = database.getCollection("Manuscript");
 
         myTable = createTable("ALL");
         Issues_List.setViewportView(myTable);
@@ -90,32 +93,29 @@ public class Issue {
                 int period_int = Integer.parseInt(period);
 
                 String timeStamp = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").format(Calendar.getInstance().getTime());
-                String update_printdate = "UPDATE Issue SET `printDate` = '" + timeStamp + "' WHERE `publicationYear` = '" + year_int + "' AND `publicationPeriod` = '" + period +"';";
-                String manu_published = "SELECT idManuscript FROM Typesetting WHERE `publicationYear` = '" + year_int + "' AND `publicationPeriod` = '" + period_int +"';";
+                issue_cl.updateOne(new Document("publicationYear", year_int).append("publicationPeriod", period_int), new Document("$set", new Document("printDate", timeStamp)));
 
-                try {
-                    stmt.execute(update_printdate);
-                    JOptionPane.showMessageDialog(frame, "Issue(" + year + " " + period +") has been published!");
-                    rst = stmt.executeQuery(manu_published);
-                    List<Integer> manuidlist = new ArrayList<>();
-                    String update_status = null;
-                    Statement temp = con.createStatement();
-                    while (rst.next()) {
-                        manuidlist.add(rst.getInt(1));
-                        update_status = "UPDATE Manuscript SET `status` = 'Published' WHERE `idManuscript` = " + rst.getInt(1);
-                        temp.execute(update_status);
-                    }
-                    String message = "Manuscript ";
-                    for(int id: manuidlist) message = message + id + ", ";
-                    message = message.substring(0, message.length() -2);
-                    message += "have been published!";
-                    JOptionPane.showMessageDialog(frame, message);
+                Document issue_dc = issue_cl.find(new Document("publicationYear", year_int).append("publicationPeriod", period_int)).first();
+                List<Document> typesetting = (ArrayList<Document>) issue_dc.get("typesetting");
+                List<Integer> manuidlist = new ArrayList<>();
 
-                    myTable = createTable((String) Status_Select.getSelectedItem());
-                    Issues_List.setViewportView(myTable);
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
+                for(Document ty: typesetting) {
+                    Double manuid_d = Double.parseDouble(ty.get("idManuscript").toString());
+                    manuidlist.add(manuid_d.intValue());
+                    manuscript_cl.updateOne(new Document("idManuscript", manuid_d.intValue()), new Document("$set", new Document("status", "Published")));
                 }
+
+                JOptionPane.showMessageDialog(frame, "Issue(" + year + " " + period +") has been published!");
+
+                String message = "Manuscript ";
+                for(int id: manuidlist) message = message + id + ", ";
+                message = message.substring(0, message.length() -2);
+                message += "have been published!";
+                JOptionPane.showMessageDialog(frame, message);
+
+                myTable = createTable((String) Status_Select.getSelectedItem());
+                Issues_List.setViewportView(myTable);
+
             }
         });
 
@@ -136,14 +136,8 @@ public class Issue {
     public JTable createTable(String status){
         Logger logger = Logger.getLogger( Editor.class.getName() );
 
-        String sql = null;
-        if(status.equals("ALL"))
-            sql = "SELECT `publicationYear`,`publicationPeriod`,`volume`,`pages`,`printDate` FROM Issue ORDER BY `publicationYear` DESC,`publicationPeriod`";
-        else if(status.equals("Published"))
-            sql = "SELECT `publicationYear`,`publicationPeriod`,`volume`,`pages`,`printDate` FROM Issue WHERE `printDate` IS NOT NULL ORDER BY `publicationYear` DESC,`publicationPeriod`";
-        else
-            sql = "SELECT `publicationYear`,`publicationPeriod`,`volume`,`pages`,`printDate` FROM Issue WHERE `printDate` IS NULL ORDER BY `publicationYear` DESC,`publicationPeriod`";
-        DefaultTableModel dtm = buildTableModel(stmt, sql);
+        String[] content = new String[] {"publicationYear", "publicationPeriod", "volume", "pages", "printDate"};
+        DefaultTableModel dtm = buildTableModel(status, content);
 
         JTable table = new JTable(dtm);
         table.setFillsViewportHeight(true);
@@ -151,29 +145,31 @@ public class Issue {
         return table;
     }
 
-    public static DefaultTableModel buildTableModel (Statement stmt, String sql){
+    public DefaultTableModel buildTableModel (String status, String[] content){
         Vector<String> columnNames = new Vector<>();
         Vector<Vector<Object>> data = new Vector<>();
-        try {
-            ResultSet rs = stmt.executeQuery(sql);
 
-            ResultSetMetaData metaData = rs.getMetaData();
+        int columnCount = content.length;
+        for (int column = 0; column < columnCount; column++)
+            columnNames.add(content[column]);
 
-            int columnCount = metaData.getColumnCount();
-            for (int column = 1; column <= columnCount; column++) {
-                columnNames.add(metaData.getColumnName(column));
+        MongoCollection<Document> issue_cl = database.getCollection("Issue");
+        FindIterable<Document> rs = null;
+        if(status.equals("ALL"))
+            rs = issue_cl.find();
+        else if(status.equals("Published"))
+            rs = issue_cl.find(ne("printDate", null));
+        else
+            rs = issue_cl.find(eq("printData", null));
+
+        for(Document d: rs) {
+            Vector<Object> vector = new Vector<Object>();
+            for(String s: content) {
+                vector.add(d.get(s));
             }
-            while (rs.next()) {
-                Vector<Object> vector = new Vector<Object>();
-                for (int columnIndex = 1; columnIndex <= columnCount; columnIndex++) {
-                    vector.add(rs.getObject(columnIndex));
-                }
-                data.add(vector);
-            }
-
-        } catch (java.sql.SQLException sqle){
-            sqle.printStackTrace();
+            data.add(vector);
         }
+
         return new DefaultTableModel(data, columnNames);
     }
 
