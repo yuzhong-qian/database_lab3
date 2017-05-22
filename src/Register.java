@@ -1,3 +1,12 @@
+import com.mongodb.BasicDBList;
+import com.mongodb.BasicDBObject;
+import com.mongodb.DBObject;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
+
+import javax.print.Doc;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
@@ -37,14 +46,11 @@ public class Register {
     private javax.swing.JPasswordField passwordField1;
     private javax.swing.JPasswordField passwordField2;
 
-    private Connection con = null;
-    private Statement stmt = null;
-    private ResultSet rst = null;
+    private MongoDatabase database = null;
 
     public static JFrame frame = new JFrame("Register_Label");
     private static List<String> interests;
     private static List<Integer> codes;
-    public static final String QUERY    = "SELECT * FROM RICodes;";
 
     public static void main(String[] args) {
         JFrame frame = new JFrame("Register_Label");
@@ -56,39 +62,32 @@ public class Register {
 
     public Register() {
         frame.setContentPane(Register_Panel);
-        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.pack();
         frame.setVisible(true);
         frame.setLocation(540, 200);
 
-        ResultSet res  = null;
-
-        try {
-            con = DatebaseConnection.connection();
-            // initialize a query statement
-            stmt = con.createStatement();
-
-            // query db and save results
-            res = stmt.executeQuery(QUERY);
-
-            // iterate through results
-            interests = new ArrayList<>();
-            codes = new ArrayList<>();
-            while(res.next()) {
-                codes.add(res.getInt(1));
-                interests.add(res.getString(2));
-            }
-
-        } catch (SQLException e ) {          // catch SQL errors
-            System.err.format("SQL Error: %s", e.getMessage());
-        } catch (Exception e) {              // anything else
-            e.printStackTrace();
-        }
-
-
         user_type.addItem("Editor");
         user_type.addItem("Author");
         user_type.addItem("Reviewer");
+
+        database = DatebaseConnection.connection();
+
+        MongoCollection<Document> RICode = database.getCollection("RICode");
+        FindIterable<Document> result_RICode = RICode.find();
+        interests = new ArrayList<>();
+        codes = new ArrayList<>();
+
+        for(Document document: result_RICode) {
+//            System.out.println(document);
+            System.out.println(document.getString("interest"));
+//            int code = Integer.valueOf(document.getDouble("idRICodes").intValue());
+            Double code = Double.parseDouble(document.get("idRICodes").toString());
+
+            codes.add(code.intValue());
+
+            interests.add(document.getString("interest"));
+        }
 
         Interest2_select.addItem("-");
         Interest3_select.addItem("-");
@@ -105,16 +104,6 @@ public class Register {
         Cancel_btn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-
-                try {
-//                    rst.close();
-                    stmt.close();
-                    con.close();
-                    System.out.print("\nConnection terminated.");
-                } catch (Exception exp) {
-                    /* ignore cleanup errors */
-                    System.out.print("\nSomething went wrong!");
-                }
                 frame.dispose();
                 Login.frame.setVisible(true);
             }
@@ -123,143 +112,107 @@ public class Register {
         Register_btn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
+
                 String s = (String) user_type.getSelectedItem();//get the selected item
-                String insert = null;
-                String signUp = null;
-                String id = null;
-                int last_inserted_id = 0;
-                PreparedStatement insert_table = null;
-                PreparedStatement signUp_table = null;
-                Statement find_id = null;
-//                Statement
+                int id = -1;
+                switch (s) {
+                    case "Editor":
+                        if (checkInput()) {
+                            MongoCollection<Document> temp = database.getCollection("Editor_Counters");
+                            Document seq = temp.find().first();
+//                            System.out.println(seq);
+                            Double seq_d = Double.parseDouble(seq.get("seq").toString());
+                            id = seq_d.intValue() + 1;
+                            temp.updateOne(new Document("_id", "Editor_ID"), new Document("$set", new Document("seq", id)));
+                            Document document = new Document();
+                            document.append("idEditor", id);
+                            document.append("EditorLastName", last_name_text.getText());
+                            document.append("EditorFirstName", first_name_text.getText());
+                            document.append("Password", securePassword(String.valueOf(passwordField1.getPassword())));
+                            MongoCollection<Document> editor = database.getCollection("Editor");
+                            editor.insertOne(document);
+                        }
+                        break;
+                    case "Author":
+                        if (checkInput() && checkOtherInfo()) {
+                            MongoCollection<Document> temp = database.getCollection("Author_Counters");
+                            Document seq = temp.find().first();
+                            Double seq_d = Double.parseDouble(seq.get("seq").toString());
+                            id = seq_d.intValue() + 1;
+                            temp.updateOne(new Document("_id", "Author_ID"), new Document("$set", new Document("seq", id)));
+                            Document document = new Document();
+                            document.append("idAuthor", id);
+                            document.append("authorLastName", last_name_text.getText());
+                            document.append("authorFirstName", first_name_text.getText());
+                            document.append("mailAddress", mailaddress_text.getText());
+                            document.append("emailAddress", emailAddress_text.getText());
+                            document.append("affiliation", affiliation_text.getText());
+                            document.append("Password", securePassword(String.valueOf(passwordField1.getPassword())));
+                            MongoCollection<Document> author = database.getCollection("Author");
+                            author.insertOne(document);
+                        }
+                        break;
+                    case "Reviewer":
+                        if (checkInput() && checkOtherInfo()) {
+                            MongoCollection<Document> temp = database.getCollection("Reviewer_Counters");
+                            Document seq = temp.find().first();
+                            Double seq_d = Double.parseDouble(seq.get("seq").toString());
+                            id = seq_d.intValue() + 1;
+                            temp.updateOne(new Document("_id", "Reviewer_ID"), new Document("$set", new Document("seq", id)));
+                            Document document = new Document();
+                            document.append("idReviewer", id);
+                            document.append("reviewerLastName", last_name_text.getText());
+                            document.append("reviewerFirstName", first_name_text.getText());
+                            document.append("emailAddress", mailaddress_text.getText());
+                            document.append("affiliation", emailAddress_text.getText());
+                            document.append("Password", securePassword(String.valueOf(passwordField1.getPassword())));
 
-                try {
-                    switch (s) {//check for a match
-                        case "Editor":
-                            if(checkInput()) {
 
-                                insert = "INSERT INTO Editor (`editorLastName`,`editorFirstName`) VALUES (?, ?)";
-                                insert_table = con.prepareStatement(insert);
-                                find_id = con.createStatement();
-                                insert_table.setString(1, last_name_text.getText());
-                                insert_table.setString(2, first_name_text.getText());
-                                insert_table.executeUpdate();
+                            String[] reviewer_interest = new String[3];
+                            reviewer_interest[0] = (String) Interest1_select.getSelectedItem();
+                            reviewer_interest[1] = (String) Interest2_select.getSelectedItem();
+                            reviewer_interest[2] = (String) Interest3_select.getSelectedItem();
 
+                            BasicDBList interests_list = new BasicDBList();
 
-                                id = "SELECT MAX(`idEditor`) FROM Editor";
-                                rst = find_id.executeQuery(id);
-                                rst.next();
-                                last_inserted_id = rst.getInt(1);
-//                            System.out.print("last id: " + last_inserted_id);
-
-                                signUp = "INSERT INTO Credential(`usertype`, `userid`, `password`) VALUES(?, ?, ?)";
-                                signUp_table = con.prepareStatement(signUp);
-                                signUp_table.setString(1, "Editor");
-                                signUp_table.setInt(2, last_inserted_id);
-                                signUp_table.setString(3, securePassword(String.valueOf(passwordField1.getPassword())));
-                                signUp_table.executeUpdate();
-
-                                JOptionPane.showMessageDialog(frame,
-                                        "Your userid is " + last_inserted_id);
-                                // cleanup
+                            for (String interest : reviewer_interest) {
+                                if (!interest.equals("-")) {
+                                    DBObject db_obj = new BasicDBObject();
+                                    db_obj.put("idRICode", getCode(interest));
+                                    db_obj.put("interest", getInterest(interest));
+                                    interests_list.add(db_obj);
+                                }
                             }
-                            break;
-                        case "Author":
-                            if(checkInput() && checkOtherInfo()) {
-                                insert = "INSERT INTO Author (`authorLastName`,`authorFirstName`, `mailAddress`,`emailAddress`,`affliation`" +
-                                        ") VALUES (?, ?, ?, ?, ?)";
-                                insert_table = con.prepareStatement(insert);
-                                find_id = con.createStatement();
-                                insert_table.setString(1, last_name_text.getText());
-                                insert_table.setString(2, first_name_text.getText());
-                                insert_table.setString(3, mailaddress_text.getText());
-                                insert_table.setString(4, emailAddress_text.getText());
-                                insert_table.setString(5, affiliation_text.getText());
+                            document.append("interestlist", interests_list);
 
-                                insert_table.executeUpdate();
-                                id = "SELECT MAX(`idAuthor`) FROM Author";
-                                rst = find_id.executeQuery(id);
-                                rst.next();
-                                last_inserted_id = rst.getInt(1);
-//                            System.out.print("last id: " + last_inserted_id);
+//                            String interests_list = "[";
+//                            for (String interest : reviewer_interest) {
+//                                if (!interest.equals("-")) {
+//                                    interests_list += "\n{\n" +
+//                                            "idRICode: " + getCode(interest) +
+//                                            "interest: " + getInterest(interest) +
+//                                            "},";
+//                                }
+//                            }
+//
+//                            interests_list = interests_list.substring(0, interests_list.length() - 1);
+//                            interests_list += "\n]";
 
+//                            System.out.println(interests_list);
 
-                                signUp = "INSERT INTO Credential(`usertype`, `userid`, `password`) VALUES(?, ?, ?)";
-                                signUp_table = con.prepareStatement(signUp);
-                                signUp_table.setString(1, "Author");
-                                signUp_table.setInt(2, last_inserted_id);
-                                signUp_table.setString(3, securePassword(String.valueOf(passwordField1.getPassword())));
-                                signUp_table.executeUpdate();
-                                JOptionPane.showMessageDialog(frame,
-                                        "Your userid is " + last_inserted_id);
-                            }break;
-                        case "Reviewer":
-                            if(checkInput() && checkOtherInfo()) {
-                                insert = "INSERT INTO Reviewer (`reviewerLastName`,`reviewerFirstName`,`emailAddress`,`affliation`" +
-                                        ") VALUES (?, ?, ?, ?)";
-                                insert_table = con.prepareStatement(insert);
-                                find_id = con.createStatement();
-                                insert_table.setString(1, last_name_text.getText());
-                                insert_table.setString(2, first_name_text.getText());
-                                insert_table.setString(3, emailAddress_text.getText());
-                                insert_table.setString(4, affiliation_text.getText());
-
-                                insert_table.executeUpdate();
-
-                                String[] reviewer_interest = new String[3];
-                                reviewer_interest[0] = (String) Interest1_select.getSelectedItem();
-                                reviewer_interest[1] = (String) Interest2_select.getSelectedItem();
-                                reviewer_interest[2] = (String) Interest3_select.getSelectedItem();
-
-                                id = "SELECT MAX(`idReviewer`) FROM Reviewer";
-                                rst = find_id.executeQuery(id);
-                                rst.next();
-                                last_inserted_id = rst.getInt(1);
-//                            System.out.print("last id: " + last_inserted_id);
-
-                                insert = "INSERT INTO InterestList (`code`,`idReviewer`) VALUES ";
-
-                                for (String temp : reviewer_interest)
-                                    if (!temp.equals("-"))
-                                        insert = insert + "(?, ?),";
-                                insert = insert.substring(0, insert.length() - 1);
-//                            System.out.print(insert);
-                                insert_table = con.prepareStatement(insert);
-                                int count = 1;
-                                for (String temp : reviewer_interest)
-                                    if (!temp.equals("-")) {
-                                        insert_table.setInt(count++, getCode(temp));
-                                        insert_table.setInt(count++, last_inserted_id);
-                                    }
-
-                                insert_table.executeUpdate();
-
-
-                                signUp = "INSERT INTO Credential(`usertype`, `userid`, `password`) VALUES(?, ?, ?)";
-                                signUp_table = con.prepareStatement(signUp);
-                                signUp_table.setString(1, "Reviewer");
-                                signUp_table.setInt(2, last_inserted_id);
-                                signUp_table.setString(3, securePassword(String.valueOf(passwordField1.getPassword())));
-                                signUp_table.executeUpdate();
-                                JOptionPane.showMessageDialog(frame,
-                                        "Your userid is " + last_inserted_id);
-                            }
-                            break;
-                        default:
-                            frame.setSize(new Dimension(250, 200));
-                            Input.setVisible(true);
-                            Other_info.setVisible(false);
-                            Interest.setVisible(false);
-                            break;
-                    }
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
+                            MongoCollection<Document> reviewer = database.getCollection("Reviewer");
+                            reviewer.insertOne(document);
+                        }
+                        break;
+                    default:
+                        frame.setSize(new Dimension(250, 200));
+                        Input.setVisible(true);
+                        Other_info.setVisible(false);
+                        Interest.setVisible(false);
+                        break;
                 }
-                try {
-                    stmt.close();
-                    con.close();
-                    System.out.print("\nConnection terminated.");
-                } catch (Exception exp) { /* ignore cleanup errors */System.out.print("\nSomething went wrong!"); }
+
+                JOptionPane.showMessageDialog(frame, "Your ID is " + id);
                 frame.dispose();
                 Login.frame.setVisible(true);
             }
@@ -341,12 +294,16 @@ public class Register {
         return true;
     }
 
-
-
     private int getCode(String s) {
         String[] array = s.split("\\s+");
         return Integer.parseInt(array[0]);
     }
+
+    private String getInterest(String s) {
+        String[] array = s.split("\\s+");
+        return array[1];
+    }
+
     private boolean checkInput(){
         if (last_name_text.getText().equals("")){
             JOptionPane.showMessageDialog(frame,
@@ -365,6 +322,7 @@ public class Register {
         }
         return true;
     }
+
     private boolean checkOtherInfo(){
         if (mailaddress_text.getText().equals("")){
             JOptionPane.showMessageDialog(frame,
