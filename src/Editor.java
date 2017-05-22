@@ -1,5 +1,10 @@
 //import com.sun.deploy.panel.SecurityLevel;
+import com.mongodb.BasicDBObject;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.sun.tools.corba.se.idl.InterfaceGen;
+import org.bson.Document;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -10,6 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 import java.util.logging.Logger;
+
+import static com.mongodb.client.model.Filters.eq;
 
 /**
  * Created by qianyuzhong on 5/1/17.
@@ -39,17 +46,12 @@ public class Editor {
     private JLabel Issues;
     private JComboBox Issues_Select;
     private JPanel Issues_Select_Part;
-    private JPanel Search_Part;
     private JTextField Search_text;
     private JButton Search;
     private javax.swing.JLabel Warning_Message;
-    private Connection con = null;
-    private Statement stmt = null;
-    private PreparedStatement preparedStatement = null;
-    private ResultSet rst = null;
+    private MongoDatabase database;
 
     private String[] keyword;
-
 
     public static void main(String[] args) {
         JFrame frame = new JFrame("Editor");
@@ -71,40 +73,20 @@ public class Editor {
         frame.setVisible(true);
         frame.setLocation(340, 5);
 
-        Warning_Message.setVisible(false);
         Typesetting_Part.setVisible(false);
         Issues_Select_Part.setVisible(false);
         Manuscript_ID.setText("Manuscript ID");
-        String query = "SELECT * FROM Editor WHERE idEditor = " + userid;
-        String warning = "SELECT `idManuscript`, COUNT(*) AS number FROM Assignment GROUP BY `idManuscript`";
-        con = DatebaseConnection.connection();
-        try {
-            stmt = con.createStatement();
-            rst = stmt.executeQuery(query);
-            String firstname = null;
-            String lastname = null;
-            while (rst.next()) {
-                firstname = rst.getString(3);
-                lastname = rst.getString(2);
-            }
 
-            rst = stmt.executeQuery(warning);
-            String warning_message = "<html>Some reviewer(s) resigned!<br>Manuscript(s) ";
-            boolean flag = false;
-            while (rst.next()) {
-                if(rst.getInt(2) < 3) {
-                    warning_message += rst.getInt(1) + ", ";
-                    flag = true;
-                }
-            }
-            warning_message = warning_message.substring(0, warning_message.length() - 2);
-            warning_message += " need you<br>to assign new reviewer(s)!";
-            Warning_Message.setText(warning_message);
-            if(flag) Warning_Message.setVisible(true);
-            Welcome.setText("Welcome, " + firstname + " " + lastname +"!");
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        database = DatebaseConnection.connection();
+
+        MongoCollection<Document> editor_cl = database.getCollection("Editor");
+        Document editor_dc = editor_cl.find(eq("idEditor", userid)).first();
+        MongoCollection<Document> manuscript_cl = database.getCollection("Manuscript");
+
+        String firstname = editor_dc.getString("EditorFirstName");
+        String lastname = editor_dc.getString("EditorLastName");
+
+        Welcome.setText("Welcome, " + firstname + " " + lastname +"!");
 
         myTable = createTable("ALL");
         Manuscripts.setViewportView(myTable);
@@ -112,12 +94,6 @@ public class Editor {
         Sign_Out.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                try {
-                    stmt.close();
-                    con.close();
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
-                }
                 frame.dispose();
                 new Login();
             }
@@ -137,16 +113,6 @@ public class Editor {
             }
         });
 
-        Search.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                String nameList = Search_text.getText();
-                keyword = nameList.split("\\s+");
-
-                myTable = createTable("Search");
-                Manuscripts.setViewportView(myTable);
-            }
-        });
 
         Change_Status_btn.addActionListener(new ActionListener() {
             @Override
@@ -165,18 +131,11 @@ public class Editor {
                 int manuid = Integer.parseInt(id);
 
                 String change_status = (String) Status_Change_Select.getSelectedItem();
-                String update;
                 int pages = 0;
 
-                String temp = "SELECT `status` FROM Manuscript WHERE `idManuscript` = " + manuid;
-                String currtent_status = "";
-                try {
-                    rst = stmt.executeQuery(temp);
-                    while (rst.next())
-                        currtent_status = rst.getString(1);
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
-                }
+
+                Document manuscript_dc = manuscript_cl.find(eq("idManuscript", manuid)).first();
+                String currtent_status = manuscript_dc.getString("status");
 
                 switch (change_status) {
                     case "Rejected":
@@ -184,7 +143,6 @@ public class Editor {
                             JOptionPane.showMessageDialog(frame, "You cannot reject this manuscript at this status!");
                             return;
                         }
-                        update = "UPDATE Manuscript SET `status` = '" + change_status + "' WHERE idManuscript = " + manuid;
                         break;
                     case "Accepted":
                         if(currtent_status.equals("In typesetting") || currtent_status.equals("Scheduled for publication") || currtent_status.equals("Published")) {
@@ -195,7 +153,6 @@ public class Editor {
                             JOptionPane.showMessageDialog(frame, "This manuscript should be first assign to reviewers to review!");
                             return;
                         }
-                        update = "UPDATE Manuscript SET `status` = '" + change_status + "' WHERE idManuscript = " + manuid;
                         break;
                     case "In typesetting":
                         if(!currtent_status.equals("Accepted")) {
@@ -213,7 +170,7 @@ public class Editor {
                             return;
                         }
 
-                        update = "UPDATE Manuscript SET `status` = '" + change_status + "', `typesetPages` = " + pages + " WHERE `idManuscript` = " + manuid;
+                        manuscript_cl.updateOne(new Document("idManuscript", manuid), new Document("$set", new Document("typesetPages", pages)));
                         break;
                     case "Scheduled for publication":
                         if(currtent_status.equals("Scheduled for publication")) {
@@ -228,59 +185,33 @@ public class Editor {
                             JOptionPane.showMessageDialog(frame, "This manuscript should be typesetting first!");
                             return;
                         }
-                        update = "UPDATE Manuscript SET `status` = '" + change_status + "' WHERE idManuscript = " + manuid + ";";
-                        String getPage = "SELECT `typesetPages` FROM Manuscript WHERE `idManuscript` = " + manuid;
 
-                        pages = 0;
-                        try {
-                            rst = stmt.executeQuery(getPage);
-                            while (rst.next())
-                                pages = rst.getInt(1);
-                        } catch (SQLException e1) {
-                            e1.printStackTrace();
-                        }
+                        pages = manuscript_dc.getInteger("typesetPages");
+
                         String[] issue = getIssue((String)Issues_Select.getSelectedItem());
+                        MongoCollection<Document> Issue = database.getCollection("Issue");
 
-                        String insert = "INSERT Typesetting (`idManuscript`, `publicationYear`,`publicationPeriod`,`beginPage`,`order`) VALUES (?, ?, ?, ?, ?);";
-                        String maxOrder = "SELECT MAX(`order`) FROM Typesetting WHERE `publicationYear` = '" + issue[0] + "' AND `publicationPeriod` = '" + issue[1] +"';";
+                        Document temp = Issue.find(new BasicDBObject("publicationYear", issue[0]).append("publicationPeriod", issue[1])).first();
+                        int cur_page = temp.getInteger("pages");
 
-                        int order = 0;
-                        try {
-                            rst = stmt.executeQuery(maxOrder);
-                            while (rst.next())
-                                order = rst.getInt(1);
-                            preparedStatement = con.prepareStatement(insert);
-                            preparedStatement.setInt(1, manuid);
-                            preparedStatement.setInt(2, Integer.parseInt(issue[0]));
-                            preparedStatement.setInt(3, Integer.parseInt(issue[1]));
-                            preparedStatement.setInt(4, Integer.parseInt(issue[2]) + 1);
-                            preparedStatement.setInt(5, order + 1);
-                            preparedStatement.executeUpdate();
-//                        String update2 =  "UPDATE Issue SET `pages` = `pages` + " + pages +
-//                                 " WHERE `publicationYear` = '" + issue[0] + "' AND `publicationPeriod` = '" + issue[1] +"';";
+//                        Issue.updateOne(new BasicDBObject("publicationYear", issue[0]).append("publicationPeriod", issue[1]), new BasicDBObject("$push", new BasicDBObject("typesetting", new BasicDBObject("idManuscript", 6).append("beginPage",1).append("order",1))));
+                        Issue.updateOne(new BasicDBObject("publicationYear", issue[0]).append("publicationPeriod", issue[1]), new BasicDBObject("$push", new BasicDBObject("typesetting", new BasicDBObject("idManuscript", manuid).append("beginPage", cur_page + 1).append("order",1))));
+                        Issue.updateOne(new BasicDBObject("publicationYear", issue[0]).append("publicationPeriod", issue[1]), new Document("$set", new Document("pages", cur_page + pages)));
 
-//                            stmt.execute(update2);
-                        } catch (SQLException e1) {
-                            e1.printStackTrace();
-                        }
+//                        String insert = "INSERT Typesetting (`idManuscript`, `publicationYear`,`publicationPeriod`,`beginPage`,`order`) VALUES (?, ?, ?, ?, ?);";
+//                        String maxOrder = "SELECT MAX(`order`) FROM Typesetting WHERE `publicationYear` = '" + issue[0] + "' AND `publicationPeriod` = '" + issue[1] +"';";
+
                         break;
                     default:
-                        update = "UPDATE Manuscript SET `status` = '" + change_status + "' WHERE idManuscript = " + manuid;
                         break;
                 }
+                manuscript_cl.updateOne(new Document("idManuscript", manuid), new Document("$set", new Document("status", change_status)));
 
-                try {
-                    stmt.execute(update);
-                    JOptionPane.showMessageDialog(frame,
-                            "Manuscript " + manuid + "'s status has been changed to " + change_status + "!");
-                    String status = (String)Status_Select.getSelectedItem();
+                JOptionPane.showMessageDialog(frame,
+                        "Manuscript " + manuid + "'s status has been changed to " + change_status + "!");
 
-                    myTable = createTable(status);
-                    Manuscripts.setViewportView(myTable);
-
-                } catch (SQLException e1) {
-                    e1.printStackTrace();
-                }
+                myTable = createTable(change_status);
+                Manuscripts.setViewportView(myTable);
             }
         });
 
@@ -318,25 +249,19 @@ public class Editor {
                         int manuid = Integer.parseInt(manuid_s);
                         Typesetting_Part.setVisible(false);
                         Issues_Select_Part.setVisible(true);
-                        String getPage = "SELECT `typesetPages` FROM Manuscript WHERE `idManuscript` = " + manuid;
 
-                        int pages = 0;
-                        try {
-                            rst = stmt.executeQuery(getPage);
-                            while (rst.next())
-                                pages = rst.getInt(1);
-                            String select = "SELECT `publicationYear`, `publicationPeriod`, `pages` FROM Issue WHERE `pages` + " + pages + " <= 100";
-//                            System.out.println(select);
-                            rst = stmt.executeQuery(select);
-                            List<String> availableIssues = new ArrayList<>();
-                            Issues_Select.removeAllItems();
-                            while (rst.next()) {
-                                String temp = "Issue:" + rst.getInt(1) + " " + rst.getInt(2) + "; pages:" + rst.getInt(3);
-                                availableIssues.add(temp);
-                                Issues_Select.addItem(temp);
+                        Document manuscript_dc = manuscript_cl.find(eq("idManuscript", manuid)).first();
+                        int pages = manuscript_dc.getInteger("typesetPages");
+
+                        MongoCollection<Document> issue_cl = database.getCollection("Issue");
+                        FindIterable<Document> d2 = issue_cl.find();
+
+                        for(Document temp: d2) {
+                            int issuePage = temp.getInteger("pages");
+                            if(issuePage + pages <= 100) {
+                                String item = "Issue:" + temp.get("publicationYear") + " " + temp.get("publicationPeriod") + "; pages:" + temp.get("pages");
+                                Issues_Select.addItem(item);
                             }
-                        } catch (SQLException e1) {
-                            e1.printStackTrace();
                         }
                         break;
                     default:
@@ -371,17 +296,17 @@ public class Editor {
 
     public JTable createTable(String status){
         Logger logger = Logger.getLogger( Editor.class.getName() );
-
-        String sql = null;
-        if(status.equals("ALL"))
-            sql = "SELECT `idManuscript`,`title`,`code`, `date`,`status`,`authorList`,`typesetPages` FROM Manuscript ORDER BY FIELD(`status`, " +
-                    "'Submitted', 'Under review', 'Rejected', 'Accepted', 'In typesetting', 'Scheduled for publication', 'Published')" ;
-        else if(status.equals("Search"))
-            sql = constructSql();
-        else
-            sql = "SELECT `idManuscript`,`title`, `code`, `date`,`status`,`authorList`,`typesetPages` FROM Manuscript WHERE `status` = '" + status + "' ORDER BY FIELD(`status`, " +
-                    "'Submitted', 'Under review', 'Rejected', 'Accepted', 'In typesetting', 'Scheduled for publication', 'Published')" ;
-        DefaultTableModel dtm = buildTableModel(stmt, sql);
+        String[] content = new String[] {"idManuscript", "title", "idRICodes", "date", "status", "typesetPages"};
+//        String sql = null;
+//        if(status.equals("ALL"))
+//            sql = "SELECT `idManuscript`,`title`,`code`, `date`,`status`,`authorList`,`typesetPages` FROM Manuscript ORDER BY FIELD(`status`, " +
+//                    "'Submitted', 'Under review', 'Rejected', 'Accepted', 'In typesetting', 'Scheduled for publication', 'Published')" ;
+//        else if(status.equals("Search"))
+//            sql = constructSql();
+//        else
+//            sql = "SELECT `idManuscript`,`title`, `code`, `date`,`status`,`authorList`,`typesetPages` FROM Manuscript WHERE `status` = '" + status + "' ORDER BY FIELD(`status`, " +
+//                    "'Submitted', 'Under review', 'Rejected', 'Accepted', 'In typesetting', 'Scheduled for publication', 'Published')" ;
+        DefaultTableModel dtm = buildTableModel(status, content);
 
         JTable table = new JTable(dtm);
         table.setFillsViewportHeight(true);
@@ -389,29 +314,27 @@ public class Editor {
         return table;
     }
 
-    public static DefaultTableModel buildTableModel (Statement stmt, String sql){
+    public DefaultTableModel buildTableModel (String status, String[] content){
         Vector<String> columnNames = new Vector<>();
         Vector<Vector<Object>> data = new Vector<>();
-        try {
-            ResultSet rs = stmt.executeQuery(sql);
 
-            ResultSetMetaData metaData = rs.getMetaData();
+        int columnCount = content.length;
+        for (int column = 0; column < columnCount; column++)
+            columnNames.add(content[column]);
 
-            int columnCount = metaData.getColumnCount();
-            for (int column = 1; column <= columnCount; column++) {
-                columnNames.add(metaData.getColumnName(column));
+        MongoCollection<Document> manuscript_cl = database.getCollection("Manuscript");
+        FindIterable<Document> rs = null;
+        if(status.equals("ALL")) rs = manuscript_cl.find();
+        else rs = manuscript_cl.find(eq("status", status));
+
+        for(Document d: rs) {
+            Vector<Object> vector = new Vector<Object>();
+            for(String s: content) {
+                vector.add(d.get(s));
             }
-            while (rs.next()) {
-                Vector<Object> vector = new Vector<Object>();
-                for (int columnIndex = 1; columnIndex <= columnCount; columnIndex++) {
-                    vector.add(rs.getObject(columnIndex));
-                }
-                data.add(vector);
-            }
-
-        } catch (java.sql.SQLException sqle){
-            sqle.printStackTrace();
+            data.add(vector);
         }
+
         return new DefaultTableModel(data, columnNames);
     }
 
