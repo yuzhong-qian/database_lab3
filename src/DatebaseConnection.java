@@ -28,7 +28,7 @@ public class DatebaseConnection {
             // connect to the mongodb server
             MongoClient mongoClient = new MongoClient( "localhost" , 27017 );
             // get database
-            MongoDatabase mongoDatabase = mongoClient.getDatabase("cuteqian_db");
+            MongoDatabase mongoDatabase = mongoClient.getDatabase("luyang_test2");
             System.out.println("Connect to database successfully");
 
             MongoCollection<Document> RICode = mongoDatabase.getCollection("RICode");
@@ -84,7 +84,7 @@ public class DatebaseConnection {
             // connect to the mongodb server
             MongoClient mongoClient = new MongoClient( "localhost" , 27017 );
             // get database
-            mongoDatabase = mongoClient.getDatabase("cuteqian_db");
+            mongoDatabase = mongoClient.getDatabase("luyang_test2");
             System.out.println("Connect to database successfully");
 
         }catch(Exception e){

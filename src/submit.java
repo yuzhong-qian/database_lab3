@@ -14,6 +14,9 @@ import java.util.Vector;
 import java.util.logging.Logger;
 import  java.io.*;
 import java.util.Date;
+import com.mongodb.client.*;
+import com.mongodb.gridfs.GridFS;
+import org.bson.*;
 
 public class submit {
     private JTextField title;
@@ -36,7 +39,6 @@ public class submit {
     private static JFrame frame = new javax.swing.JFrame("submit");
     private static List<String> interests;
     private static List<Integer> codes;
-    public static final String QUERY    = "SELECT * FROM RICodes;";
 
 
 //    public static void main(String[] args) {
@@ -48,12 +50,12 @@ public class submit {
 //    }
     public submit(){}
 
-//    public submit(int authorID, String name) {
+    public submit(int authorID, String name , MongoDatabase database) {
 //
-//        frame.setContentPane(panel1);
-//        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-//        frame.pack();
-//        frame.setVisible(true);
+        frame.setContentPane(panel1);
+        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        frame.pack();
+        frame.setVisible(true);
 //
 //        ResultSet res  = null;
 //
@@ -80,42 +82,98 @@ public class submit {
 //            e.printStackTrace();
 //        }
 //
+        MongoCollection<org.bson.Document> RICode = database.getCollection("RICode");
+        FindIterable<org.bson.Document> result_RICode = RICode.find();
+        interests = new ArrayList<>();
+        codes = new ArrayList<>();
+
+        for(org.bson.Document document: result_RICode) {
+//            System.out.println(document);
+//            System.out.println(document.getString("interest"));
+//            int code = Integer.valueOf(document.getDouble("idRICodes").intValue());
+            Double code = Double.parseDouble(document.get("idRICodes").toString());
+            codes.add(code.intValue());
+            interests.add(document.getString("interest"));
+            RICodeBox.addItem(code.intValue() + " " +document.getString("interest"));
+        }
+
+
+
 //        // Choose your file button action.
-//        chooseFileButton.addActionListener(new ActionListener() {
-//            @Override
-//            public void actionPerformed(java.awt.event.ActionEvent e) {
-//                javax.swing.JFileChooser fileChooser = new javax.swing.JFileChooser();
-//                int returnValue = fileChooser.showOpenDialog(null);
-//                if (returnValue == javax.swing.JFileChooser.APPROVE_OPTION)
-//                {
-//                    selectedFile = fileChooser.getSelectedFile();
-//                    chooseFileButton.setText(selectedFile.getName());
-//                }
-//            }
-//        });
+        chooseFileButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                javax.swing.JFileChooser fileChooser = new javax.swing.JFileChooser();
+                int returnValue = fileChooser.showOpenDialog(null);
+                if (returnValue == javax.swing.JFileChooser.APPROVE_OPTION)
+                {
+                    selectedFile = fileChooser.getSelectedFile();
+                    chooseFileButton.setText(selectedFile.getName());
+                }
+            }
+        });
 //
 //
 //
-//        // submit button action.
-//        submitButton1.addActionListener(new ActionListener() {
-//            @Override
-//            public void actionPerformed(ActionEvent e) {
-//                int interestCode = getCode((String) RICodeBox.getSelectedItem());
-//                setSubmitButton(authorID, interestCode, name);
-//            }
-//        });
+        // submit button action.
+        submitButton1.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                int interestCode = getCode((String) RICodeBox.getSelectedItem());
+                setSubmitButton(authorID, interestCode, name, database);
+            }
+        });
 //
-//        cancelButton.addActionListener(new ActionListener() {
-//            @Override
-//            public void actionPerformed(ActionEvent e) {
-//                submit.frame.dispose();
-//                Author.frame.setVisible(true);
-//            }
-//        });
+        cancelButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                submit.frame.dispose();
+                Author.frame.setVisible(true);
+            }
+        });
 //
-//    }
+    }
 //
-//    public void setSubmitButton(int authorId, int interestCode, String name){
+    public void setSubmitButton(int authorId, int interestCode, String name, MongoDatabase database)  {
+
+        MongoCollection<org.bson.Document> temp = database.getCollection("Author_Counters");
+        org.bson.Document seq = temp.find().first();
+        Double seq_d = Double.parseDouble(seq.get("seq").toString());
+        int id = seq_d.intValue() + 1;
+        temp.updateOne(new org.bson.Document("_id", "Author_ID"), new org.bson.Document("$set", new org.bson.Document("seq", id)));
+
+        Document document = new org.bson.Document();
+        document.append("idManuscript", id);
+        document.append("title", title.getText());
+        Date date = new Date();
+        document.append("date",date);
+        document.append("status", "Submitted");
+        document.append("authorList", getAuthorList(name));
+        com.mongodb.Mongo mongo = new com.mongodb.Mongo("localhost", 27017);
+        com.mongodb.DB db = mongo.getDB("luyang_test");
+        GridFS fs = new GridFS(db, "uploadFiles");
+        com.mongodb.gridfs.GridFSInputFile gfsFile = null;
+        try {
+            gfsFile = fs.createFile(selectedFile);
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
+        }
+        gfsFile.save();
+        com.mongodb.DBCollection collection = db.getCollection("uploads_meta");
+        com.mongodb.BasicDBObject info = new com.mongodb.BasicDBObject();
+        info.put("idManuscript",id);
+        info.put("Filename", selectedFile.getName());
+        collection.insert(info);
+
+        document.append("idAuthor", authorId);
+        document.append("idRICodes", interestCode);
+
+        MongoCollection<Document> Manu = database.getCollection("Manuscript");
+        Manu.insertOne(document);
+        JOptionPane.showMessageDialog(frame, "You have submitted one manuscript!");
+        submit.frame.dispose();
+        Author.frame.setVisible(true);
+//        document.append("content",);
 //        String insert = "INSERT Manuscript (`title`, `date`,`status`,`authorList`,`content`, `typesetPages`, `idAuthor`, `idEditor`, `code`) VALUES"
 //                + " (?, ?, ?, ?, ?, ?, ?, ?, ?);";
 //        PreparedStatement submit_table = null;
@@ -126,7 +184,7 @@ public class submit {
 //                JOptionPane.showMessageDialog(frame, "You should enter title!");
 //            }
 //            submit_table.setString(1, title.getText());
-//            Date date = new Date();
+//
 //            Timestamp timeStamp = new Timestamp(date.getTime());
 //            submit_table.setTimestamp(2, timeStamp);
 //            submit_table.setString(3, "Submitted");
@@ -141,7 +199,6 @@ public class submit {
 //                e.printStackTrace();
 //            }
 //            submit_table.setNull(6,java.sql.Types.INTEGER);
-//
 //            submit_table.setInt(7, authorId);
 //            submit_table.setNull(8, java.sql.Types.INTEGER);
 //            submit_table.setInt(9, interestCode);
@@ -160,21 +217,21 @@ public class submit {
 //        } catch (SQLException e){
 //            e.printStackTrace();
 //        }
-//    }
+    }
 //
-//    public String getAuthorList(String name){
-//        String res = name;
-//        if (!Author2.getText().equals("") ){
-//            res += ", " +  Author2.getText();
-//        }
-//        if (!Author3.getText().equals("")) {
-//            res += ", " + Author3.getText() ;
-//        }
-//        if (!Author4.getText().equals("")) {
-//            res += ", " + Author4.getText();
-//        }
-//        return res;
-//    }
+    public String getAuthorList(String name){
+        String res = name;
+        if (!Author2.getText().equals("") ){
+            res += ", " +  Author2.getText();
+        }
+        if (!Author3.getText().equals("")) {
+            res += ", " + Author3.getText() ;
+        }
+        if (!Author4.getText().equals("")) {
+            res += ", " + Author4.getText();
+        }
+        return res;
+    }
 //
 //    public boolean checkRICode(int code){
 //        ResultSet rst = null;
@@ -194,11 +251,11 @@ public class submit {
 //
 //    }
 //
-//    private int getCode(String s) {
-//        String[] array = s.split("\\s+");
-//        return Integer.parseInt(array[0]);
-//    }
-//
+    private int getCode(String s) {
+        String[] array = s.split("\\s+");
+        return Integer.parseInt(array[0]);
+    }
+
 
 
 }

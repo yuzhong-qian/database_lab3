@@ -174,6 +174,14 @@ public class Register {
                             reviewer_interest[2] = (String) Interest3_select.getSelectedItem();
 
                             BasicDBList interests_list = new BasicDBList();
+                            temp = database.getCollection("interest_Counters");
+                            seq = temp.find().first();
+                            Double seq_num = Double.parseDouble(seq.get("seq").toString());
+                            int id_interest = seq_num.intValue() + 1;
+//                            int seq_num = seq.getInteger("seq");
+//                             = seq_num + 1;
+                            temp.updateOne(new Document("_id", "Reviewer_ID"), new Document("$set", new Document("seq", id_interest)));
+                            MongoCollection<org.bson.Document> interest_col = database.getCollection("interestlist");
 
                             for (String interest : reviewer_interest) {
                                 if (!interest.equals("-")) {
@@ -181,6 +189,8 @@ public class Register {
                                     db_obj.put("idRICode", getCode(interest));
                                     db_obj.put("interest", getInterest(interest));
                                     interests_list.add(db_obj);
+
+                                    interest_col.insertOne(new Document("idItem",id_interest).append("idReviewer", id).append("idRICodes", getCode(interest)));
                                 }
                             }
                             document.append("interestlist", interests_list);

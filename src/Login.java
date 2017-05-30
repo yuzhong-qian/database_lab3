@@ -96,7 +96,7 @@ public class Login {
                     } else {
                         frame.dispose();
                         if (user.equals("Editor")) new Editor(userid);
-//                        else if (user.equals("Author")) new Author(userid);
+                        else if (user.equals("Author")) new Author(userid);
                         else if (user.equals("Reviewer")) new Reviewer(userid);
                         else JOptionPane.showMessageDialog(frame,
                                     "No such user type!");
@@ -131,7 +131,8 @@ public class Login {
 
         Document document = temp.find(eq("id" + type, id)).first();
 
-        if(document.get("Password").equals(securePassword(userPassword))) return true;
+        if(document.get("Password").equals(securePassword(userPassword)))
+            return true;
         return false;
     }
 

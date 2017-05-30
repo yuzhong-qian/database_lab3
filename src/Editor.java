@@ -76,7 +76,6 @@ public class Editor {
         Typesetting_Part.setVisible(false);
         Issues_Select_Part.setVisible(false);
         Manuscript_ID.setText("Manuscript ID");
-
         database = DatebaseConnection.connection();
 
         MongoCollection<Document> editor_cl = database.getCollection("Editor");
